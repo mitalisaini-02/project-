@@ -8,8 +8,22 @@
 #define MAX_TITLE_LENGTH 100
 #define MAX_GROUPS 26 // A to Z
 #define MAX_RECOMMENDATIONS 5 // Number of recommendations to show
+#include <time.h>
+
+#define MAX_LEVEL 10
+#define MAX_GENRES 5
+#define MAX_TITLE_LENGTH 100
+#define MAX_GROUPS 26 // A to Z
+#define MAX_RECOMMENDATIONS 5 // Number of recommendations to show
 
 typedef struct Book {
+    char title[MAX_TITLE_LENGTH];
+    char author[MAX_TITLE_LENGTH];
+    char genre[MAX_GENRES][MAX_TITLE_LENGTH];
+    int borrow_count;
+    time_t last_borrowed;
+    struct Book *forward[MAX_LEVEL];
+    struct Book *next; // Pointer to the next book in the alphabetical group
     char title[MAX_TITLE_LENGTH];
     char author[MAX_TITLE_LENGTH];
     char genre[MAX_GENRES][MAX_TITLE_LENGTH];
