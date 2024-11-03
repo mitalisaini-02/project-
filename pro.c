@@ -348,143 +348,190 @@ void free_library(Library *library) {
     free(library);
 }
 
-// Main function
 int main()
 {
     srand(time(NULL));
     Library *library = create_library();
 
+    int user_type;
+    printf("Welcome to the Library Management System!\n");
+    printf("Are you a:\n");
+    printf("1. Visitor\n");
+    printf("2. Staff\n");
+    printf("Enter your choice: ");
+    scanf("%d", &user_type);
+    getchar(); // to consume newline
+
     int choice;
     do
     {
-        printf("\nLibrary Menu:\n");
-        printf("1. Load books from file\n");
-        printf("2. Add a new book\n");
-        printf("3. Search for a book\n");
-        printf("4. Print all books\n");
-        printf("5. recommend books\n");
-        printf("6. Borrow a book\n");
-        printf("7. Return a book\n");
-        printf("8. Exit\n");
-        printf("Enter your choice: ");
-        scanf("%d", &choice);
-        getchar(); // to consume newline
-
-        if (choice == 1)
+        if (user_type == 1) // Visitor options
         {
-            char filename[100];
-            printf("Enter the filename to load books from: ");
-            fgets(filename, sizeof(filename), stdin);
-            filename[strcspn(filename, "\n")] = '\0';
-            read_books_from_file(library, filename);
-        }
-        else if (choice == 2)
-        {
-            char title[MAX_TITLE_LENGTH], author[MAX_AUTHOR_LENGTH];
-            char genres[MAX_GENRES][MAX_TITLE_LENGTH];
-            int genre_count;
-            int borrow_count = 0;
-            printf("Enter book title: ");
-            fgets(title, MAX_TITLE_LENGTH, stdin);
-            title[strcspn(title, "\n")] = '\0';
+            printf("\nVisitor Menu:\n");
+            printf("1. Search for a book\n");
+            printf("2. Print all books\n");
+            printf("3. Recommend books\n");
+            printf("4. Borrow a book\n");
+            printf("5. Return a book\n");
+            printf("6. Exit\n");
+            printf("Enter your choice: ");
+            scanf("%d", &choice);
+            getchar(); // to consume newline
 
-            printf("Enter author name: ");
-            fgets(author, MAX_AUTHOR_LENGTH, stdin);
-            author[strcspn(author, "\n")] = '\0';
-
-            printf("Enter number of genres: ");
-            scanf("%d", &genre_count);
-            getchar();
-            for (int i = 0; i < genre_count; i++)
+            if (choice == 1)
             {
-                printf("Enter genre %d: ", i + 1);
-                fgets(genres[i], MAX_TITLE_LENGTH, stdin);
-                genres[i][strcspn(genres[i], "\n")] = '\0';
+                char title[MAX_TITLE_LENGTH], genre[MAX_TITLE_LENGTH];
+                printf("Enter book title to search: ");
+                fgets(title, MAX_TITLE_LENGTH, stdin);
+                title[strcspn(title, "\n")] = '\0';
+
+                printf("Enter genre to search: ");
+                fgets(genre, MAX_TITLE_LENGTH, stdin);
+                genre[strcspn(genre, "\n")] = '\0';
+
+                Book *book = search_book(library, title, genre);
+                if (book)
+                {
+                    printf("Book found: Title: %s, Author: %s\n", book->title, book->author);
+                }
+                else
+                {
+                    printf("Book not found.\n");
+                }
             }
-            add_book(library, title, author, genres, genre_count, borrow_count);
-            printf("Book added successfully.\n");
-        }
-        else if (choice == 3)
-        {
-            char title[MAX_TITLE_LENGTH], genre[MAX_TITLE_LENGTH];
-            printf("Enter book title to search: ");
-            fgets(title, MAX_TITLE_LENGTH, stdin);
-            title[strcspn(title, "\n")] = '\0';
-
-            printf("Enter genre to search: ");
-            fgets(genre, MAX_TITLE_LENGTH, stdin);
-            genre[strcspn(genre, "\n")] = '\0';
-
-            Book *book = search_book(library, title, genre);
-            if (book)
+            else if (choice == 2)
             {
-                printf("Book found: Title: %s, Author: %s\n", book->title, book->author);
+                print_books(library);
             }
-            else
+            else if (choice == 3)
             {
-                printf("Book not found.\n");
+                char genre[MAX_TITLE_LENGTH];
+                printf("Enter genre to search: ");
+                fgets(genre, MAX_TITLE_LENGTH, stdin);
+                genre[strcspn(genre, "\n")] = '\0';
+                recommend_books(library, genre);
             }
-        }
-        else if (choice == 4)
-        {
-            print_books(library);
-        }
-        else if (choice == 5)
-        {
-            char genre[MAX_TITLE_LENGTH];
-            printf("Enter genre to search: ");
-            fgets(genre, MAX_TITLE_LENGTH, stdin);
-            genre[strcspn(genre, "\n")] = '\0';
-            recommend_books(library, genre);
-        }
-        else if (choice == 6)
-        {
-            char title[MAX_TITLE_LENGTH], genre[MAX_TITLE_LENGTH];
-            printf("Enter book title to search: ");
-            fgets(title, MAX_TITLE_LENGTH, stdin);
-            title[strcspn(title, "\n")] = '\0';
-
-            printf("Enter genre to search: ");
-            fgets(genre, MAX_TITLE_LENGTH, stdin);
-            genre[strcspn(genre, "\n")] = '\0';
-
-            Book *book = search_book(library, title, genre); // Search without genre
-            if (book && strcmp(book->status, "available") == 0)
+            else if (choice == 4) // Borrow a book
             {
-                strcpy(book->status, "borrowed");
-                book->last_borrowed = time(NULL); // Update last borrowed time
-                book->borrow_count++;
-                printf("You have borrowed: %s by %s\n", book->title, book->author);
+                char title[MAX_TITLE_LENGTH], genre[MAX_TITLE_LENGTH];
+                printf("Enter book title to borrow: ");
+                fgets(title, MAX_TITLE_LENGTH, stdin);
+                title[strcspn(title, "\n")] = '\0';
+
+                printf("Enter genre: ");
+                fgets(genre, MAX_TITLE_LENGTH, stdin);
+                genre[strcspn(genre, "\n")] = '\0';
+
+                Book *book = search_book(library, title, genre);
+                if (book && strcmp(book->status, "available") == 0)
+                {
+                    strcpy(book->status, "borrowed");
+                    book->last_borrowed = time(NULL);
+                    book->borrow_count++;
+                    printf("You have borrowed: %s by %s\n", book->title, book->author);
+                }
+                else
+                {
+                    printf("Book is not available for borrowing.\n");
+                }
             }
-            else
+            else if (choice == 5) // Return a book
             {
-                printf("Book is not available for borrowing.\n");
+                char title[MAX_TITLE_LENGTH], genre[MAX_TITLE_LENGTH];
+                printf("Enter book title to return: ");
+                fgets(title, MAX_TITLE_LENGTH, stdin);
+                title[strcspn(title, "\n")] = '\0';
+
+                printf("Enter genre: ");
+                fgets(genre, MAX_TITLE_LENGTH, stdin);
+                genre[strcspn(genre, "\n")] = '\0';
+
+                Book *book = search_book(library, title, genre);
+                if (book && strcmp(book->status, "borrowed") == 0)
+                {
+                    strcpy(book->status, "available");
+                    printf("You have returned: %s by %s\n", book->title, book->author);
+                }
+                else
+                {
+                    printf("This book was not borrowed or does not exist in the library.\n");
+                }
             }
         }
-        else if (choice == 7)
+        else if (user_type == 2) // Staff options
         {
-            char title[MAX_TITLE_LENGTH], author[MAX_AUTHOR_LENGTH], genre[MAX_TITLE_LENGTH];
-            printf("Enter book title to search: ");
-            fgets(title, MAX_TITLE_LENGTH, stdin);
-            title[strcspn(title, "\n")] = '\0';
+            printf("\nStaff Menu:\n");
+            printf("1. Load books from file\n");
+            printf("2. Add a new book\n");
+            printf("3. Search for a book\n");
+            printf("4. Print all books\n");
+            printf("5. Exit\n");
+            printf("Enter your choice: ");
+            scanf("%d", &choice);
+            getchar(); // to consume newline
 
-            printf("Enter genre to search: ");
-            fgets(genre, MAX_TITLE_LENGTH, stdin);
-            genre[strcspn(genre, "\n")] = '\0';
-
-            Book *book = search_book(library, title, genre); // Search without genre
-            if (book && strcmp(book->status, "borrowed") == 0)
+            if (choice == 1)
             {
-                strcpy(book->status, "available");
-                printf("You have returned: %s by %s\n", book->title, book->author);
+                char filename[100];
+                printf("Enter the filename to load books from: ");
+                fgets(filename, sizeof(filename), stdin);
+                filename[strcspn(filename, "\n")] = '\0';
+                read_books_from_file(library, filename);
             }
-            else
+            else if (choice == 2)
             {
-                printf("This book was not borrowed or does not exist in the library.\n");
+                char title[MAX_TITLE_LENGTH], author[MAX_AUTHOR_LENGTH];
+                char genres[MAX_GENRES][MAX_TITLE_LENGTH];
+                int genre_count;
+                int borrow_count = 0;
+                printf("Enter book title: ");
+                fgets(title, MAX_TITLE_LENGTH, stdin);
+                title[strcspn(title, "\n")] = '\0';
+
+                printf("Enter author name: ");
+                fgets(author, MAX_AUTHOR_LENGTH, stdin);
+                author[strcspn(author, "\n")] = '\0';
+
+                printf("Enter number of genres: ");
+                scanf("%d", &genre_count);
+                getchar();
+                for (int i = 0; i < genre_count; i++)
+                {
+                    printf("Enter genre %d: ", i + 1);
+                    fgets(genres[i], MAX_TITLE_LENGTH, stdin);
+                    genres[i][strcspn(genres[i], "\n")] = '\0';
+                }
+                add_book(library, title, author, genres, genre_count, borrow_count);
+                printf("Book added successfully.\n");
+            }
+            else if (choice == 3)
+            {
+                char title[MAX_TITLE_LENGTH], genre[MAX_TITLE_LENGTH];
+                printf("Enter book title to search: ");
+                fgets(title, MAX_TITLE_LENGTH, stdin);
+                title[strcspn(title, "\n")] = '\0';
+
+                printf("Enter genre to search: ");
+                fgets(genre, MAX_TITLE_LENGTH, stdin);
+                genre[strcspn(genre, "\n")] = '\0';
+
+                Book *book = search_book(library, title, genre);
+                if (book)
+                {
+                    printf("Book found: Title: %s, Author: %s\n", book->title, book->author);
+                }
+                else
+                {
+                    printf("Book not found.\n");
+                }
+            }
+            else if (choice == 4)
+            {
+                print_books(library);
             }
         }
 
-    } while (choice != 8);
+    } while (choice != 5); // For both visitors and staff, exit option
 
     free_library(library);
     return 0;
