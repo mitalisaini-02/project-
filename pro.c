@@ -2,93 +2,198 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
-#define MAX_LEVEL 10
-#define MAX_GENRES 5
-#define MAX_TITLE_LENGTH 100
-#define MAX_GROUPS 26 // A to Z
-#define MAX_RECOMMENDATIONS 5 // Number of recommendations to show
-#include <time.h>
+#define MAX_LEVEL 16                     
+#define MAX_GENRES 10                    
+#define MAX_TITLE_LENGTH 100             
+#define MAX_AUTHOR_LENGTH 100            
+#define DECAY_RATE 0.9                   
+#define RECOMMENDATION_COUNT 5  
 
-#define MAX_LEVEL 10
-#define MAX_GENRES 5
-#define MAX_TITLE_LENGTH 100
-#define MAX_GROUPS 26 // A to Z
-#define MAX_RECOMMENDATIONS 5 // Number of recommendations to show
 
+// Structure to represent a book in the library
 typedef struct Book {
-    char title[MAX_TITLE_LENGTH];
-    char author[MAX_TITLE_LENGTH];
+    char title[MAX_TITLE_LENGTH];          
+    char author[MAX_AUTHOR_LENGTH];        
     char genre[MAX_GENRES][MAX_TITLE_LENGTH];
-    int borrow_count;
-    time_t last_borrowed;
-    struct Book *forward[MAX_LEVEL];
-    struct Book *next; // Pointer to the next book in the alphabetical group
-    char title[MAX_TITLE_LENGTH];
-    char author[MAX_TITLE_LENGTH];
-    char genre[MAX_GENRES][MAX_TITLE_LENGTH];
-    int borrow_count;
-    time_t last_borrowed;
-    struct Book *forward[MAX_LEVEL];
-    struct Book *next; // Pointer to the next book in the alphabetical group
+    int gen_count;
+    int borrow_count;                      
+    time_t last_borrowed; 
+    char status[MAX_TITLE_LENGTH];                
+    struct Book *forward[MAX_LEVEL];       
 } Book;
 
+// Structure to represent the library containing the skip graph
 typedef struct Library {
-    Book *genre_heads[MAX_GENRES];  // Array for different genres
-    Book *title_groups[MAX_GROUPS];  // Grouping books alphabetically
-    int level;                       // Maximum level in the skip graph
-    int total_books;                 // Total number of books in the library
+    Book *header;                          
+    int level;                             
+    int total_books;              
+    Book *recommendations[MAX_LEVEL];           
 } Library;
 
-// Initialize the library
-void init_library(Library *library) {
-    for (int i = 0; i < MAX_GENRES; i++) {
-        library->genre_heads[i] = NULL;
-    }
-    for (int i = 0; i < MAX_GROUPS; i++) {
-        library->title_groups[i] = NULL;
-    }
-    library->level = 0;
-    library->total_books = 0;
+// Structure to represent a max-heap for recommendations
+typedef struct MaxHeap {
+    Book **books;
+    int size;
+    int capacity;
+} MaxHeap;
+
+// Heap functions for recommendations
+MaxHeap *create_heap(int capacity);
+void insert_heap(MaxHeap *heap, Book *book);
+Book *extract_max(MaxHeap *heap);
+void heapify_down(MaxHeap *heap, int index);
+void heapify_up(MaxHeap *heap, int index);
+
+// Function prototypes
+Library *create_library();
+void add_book(Library *library, const char *title, const char *author, const char genres[MAX_GENRES][MAX_TITLE_LENGTH], const int genre_count,const int borrow_count);
+Book *search_book(Library *library, const char *title, const char *genre);
+void decay_borrow_counts(Library *library);
+void print_books(Library *library);
+void free_library(Library *library);
+void read_books_from_file(Library *library, const char *filename);
+
+
+
+// Heap functions
+MaxHeap *create_heap(int capacity) {
+    MaxHeap *heap = (MaxHeap *)malloc(sizeof(MaxHeap));
+    heap->books = (Book **)malloc(capacity * sizeof(Book *));
+    heap->size = 0;
+    heap->capacity = capacity;
+    return heap;
 }
 
-// Function to determine the group index for a title
-int get_group_index(const char *title) {
-    char first_char = title[0];
-    if (first_char >= 'A' && first_char <= 'Z') {
-        return first_char - 'A'; // A=0, B=1, ..., Z=25
-    } else if (first_char >= 'a' && first_char <= 'z') {
-        return first_char - 'a'; // a=0, b=1, ..., z=25
+void insert_heap(MaxHeap *heap, Book *book) {
+    if (heap->size < heap->capacity) {
+        heap->books[heap->size] = book;
+        heapify_up(heap, heap->size);
+        heap->size++;
+    } else if (book->borrow_count > heap->books[0]->borrow_count) {
+        heap->books[0] = book;
+        heapify_down(heap, 0);
+    } else if (book->borrow_count == heap->books[0]->borrow_count) {
+        // Add to the end if there is a tie
+        heap->books[heap->size] = book;
+        heap->size++;
+        heapify_up(heap, heap->size - 1);
     }
-    return -1; // Invalid starting character
 }
 
-// Function to determine the genre group index
-int get_genre_index(const char *genre) {
-    const char *genres[] = {
-        "Fiction", "Non-Fiction", "Fantasy", "Science Fiction",
-        "Biography", "History", "Mystery", "Romance", "Horror", "Adventure"
-    };
-    for (int i = 0; i < 10; i++) {
-        if (strcmp(genre, genres[i]) == 0) return i;
-    }
-    return -1;  // Invalid genre
+Book *extract_max(MaxHeap *heap) {
+    if (heap->size == 0) return NULL;
+    Book *max = heap->books[0];
+    heap->books[0] = heap->books[--heap->size];
+    heapify_down(heap, 0);
+    return max;
 }
 
-// Function to add a book to the library
-void add_book(Library *library, const char *title, const char *author, const char genres[MAX_GENRES][MAX_TITLE_LENGTH], int genre_count) {
-    // Create a new book
-    Book *new_book = (Book *)malloc(sizeof(Book));
-    strcpy(new_book->title, title); 
+void heapify_up(MaxHeap *heap, int index) {
+    while (index > 0) {
+        int parent = (index - 1) / 2;
+        if (heap->books[parent]->borrow_count >= heap->books[index]->borrow_count) break;
+        Book *temp = heap->books[parent];
+        heap->books[parent] = heap->books[index];
+        heap->books[index] = temp;
+        index = parent;
+    }
+}
+
+void heapify_down(MaxHeap *heap, int index) {
+    while (2 * index + 1 < heap->size) {
+        int left = 2 * index + 1;
+        int right = left + 1;
+        int largest = left;
+        if (right < heap->size && heap->books[right]->borrow_count > heap->books[left]->borrow_count) {
+            largest = right;
+        }
+        if (heap->books[index]->borrow_count >= heap->books[largest]->borrow_count) break;
+        Book *temp = heap->books[index];
+        heap->books[index] = heap->books[largest];
+        heap->books[largest] = temp;
+        index = largest;
+    }
+}
+
+// Modify the recommend_books function to handle ties
+void recommend_books(Library *library, const char *genre) {
+    MaxHeap *heap = create_heap(RECOMMENDATION_COUNT);
+
+    printf("Gathering books in genre '%s'...\n", genre);  // Debugging: Print genre
+
+    for (Book *current = library->header->forward[0]; current != NULL; current = current->forward[0]) {
+        // Check if the book contains the specified genre
+        int genre_found = 0;
+        for (int j = 0; j < current->gen_count; j++) {
+            if (strcmp(current->genre[j], genre) == 0) {
+                genre_found = 1;
+                break;
+            }
+        }
+
+        // Debugging: Print each book's genre and borrow count
+        if (genre_found) {
+            printf("Found Book: %s (Borrow Count: %d)\n", current->title, current->borrow_count);
+            insert_heap(heap, current);  // Add to heap only if it matches the genre
+        }
+    }
+
+    // Display the top recommendations
+    printf("\nTop Recommended Books in Genre '%s':\n", genre);
+    if (heap->size == 0) {
+        printf("No recommendations available.\n");
+    } else {
+        int last_borrow_count = -1;
+        for (int i = 0; i < RECOMMENDATION_COUNT && heap->size > 0; i++) {
+            Book *recommended = extract_max(heap);
+            if (recommended) {  // Ensure recommended book exists
+                if (recommended->borrow_count != last_borrow_count) {
+                    last_borrow_count = recommended->borrow_count;  // Update the last borrow count
+                    printf("Title: %s, Author: %s, Borrow Count: %d\n",
+                        recommended->title, recommended->author, recommended->borrow_count);
+                }
+                // To handle additional books with the same borrow count
+                while (heap->size > 0 && heap->books[0]->borrow_count == last_borrow_count) {
+                    recommended = extract_max(heap);
+                    printf("Title: %s, Author: %s, Borrow Count: %d\n",
+                           recommended->title, recommended->author, recommended->borrow_count);
+                }
+            }
+        }
+    }
+
+    free(heap->books);
+    free(heap);
+}
+
+// Function to create a new library
+Library *create_library() {
+    Library *library = (Library *)malloc(sizeof(Library));
+    library->header = (Book *)malloc(sizeof(Book));
+    strcpy(library->header->title, ""); 
+    library->header->borrow_count = 0; 
+    library->level = 0;                 
+    library->total_books = 0;           
+
+    for (int i = 0; i < MAX_LEVEL; i++) {
+        library->header->forward[i] = NULL;
+    }
+    return library; 
+}
+
+// Function to add a new book to the library
+void add_book(Library *library, const char *title, const char *author, const char genres[MAX_GENRES][MAX_TITLE_LENGTH], int genre_count, int borrow_count ) {
+    Book *new_book = (Book *)malloc(sizeof(Book)); 
+    strcpy(new_book->title, title);
     strcpy(new_book->author, author);
+
     for (int i = 0; i < genre_count; i++) {
         strcpy(new_book->genre[i], genres[i]);
     }
-    new_book->borrow_count = 0; // Initialize borrow count to zero
-    new_book->last_borrowed = 0;
-    new_book->next = NULL; // Initialize the next pointer
-
-    // Determine the skip level for the new book
+    new_book->borrow_count=borrow_count;
+    new_book->gen_count = genre_count;
     int level = 0;
     while ((rand() % 2) && (level < MAX_LEVEL - 1)) {
         level++;
@@ -96,289 +201,291 @@ void add_book(Library *library, const char *title, const char *author, const cha
     if (level > library->level) {
         library->level = level;
     }
-
-    // Insert the new book in the appropriate genre
-    int genre_index = get_genre_index(genres[0]);
-    if (genre_index < 0) {
-        printf("Error: Invalid genre '%s'. Adding to library anyway.\n", genres[0]);
-        genre_index = library->total_books % MAX_GENRES; // Assign to a random genre if invalid
-    }
-
-    // Insert the new book in the skip graph of the selected genre
-    Book *current = library->genre_heads[genre_index];
-    if (!current) {
-        library->genre_heads[genre_index] = new_book;
-        for (int i = 0; i < MAX_LEVEL; i++) {
-            new_book->forward[i] = NULL;
+    strcpy(new_book->status,"available");
+    Book *current = library->header;
+    for (int i = library->level; i >= 0; i--) {
+        while (current->forward[i] != NULL && strcmp(current->forward[i]->title, title) < 0) {
+            current = current->forward[i];
         }
-    } else {
-        // Navigate to insert the new book
-        Book *update[MAX_LEVEL];  
-        for (int i = library->level; i >= 0; i--) {
-            while (current->forward[i] != NULL && strcmp(current->forward[i]->title, title) < 0) {
-                current = current->forward[i];
-            }
-            update[i] = current;  
-        }
-
-        // Insert the new book at appropriate levels
-        for (int i = 0; i <= level; i++) {
-            if (i > library->level) break; 
-            new_book->forward[i] = update[i]->forward[i];
-            update[i]->forward[i] = new_book;
+        if (i <= level) {
+            new_book->forward[i] = current->forward[i];
+            current->forward[i] = new_book;
         }
     }
 
-    // Update library's total book count
     library->total_books++;
-
-    // Add the book to the alphabetical group
-    int group_index = get_group_index(title);
-    if (group_index >= 0 && group_index < MAX_GROUPS) {
-        // Insert the book into the alphabetical linked list
-        if (library->title_groups[group_index] == NULL) {
-            library->title_groups[group_index] = new_book;
-        } else {
-            Book *group_current = library->title_groups[group_index];
-            Book *prev = NULL;
-            while (group_current != NULL && strcmp(group_current->title, title) < 0) {
-                prev = group_current;
-                group_current = group_current->next;
-            }
-            // Insert the new book in the appropriate place
-            new_book->next = group_current;
-            if (prev == NULL) {
-                library->title_groups[group_index] = new_book; // Insert at the head
-            } else {
-                prev->next = new_book; // Insert in the middle or end
-            }
-        }
-    } else {
-        free(new_book); // Free if the group index is invalid
-    }
 }
 
-// Function to load books from a file
-void load_books_from_file(Library *library, const char *filename) {
+void read_books_from_file(Library *library, const char *filename) {
     FILE *file = fopen(filename, "r");
     if (!file) {
-        printf("Could not open file %s\n", filename);
+        printf("Error opening file.\n");
         return;
     }
 
-    char line[256]; // Buffer to hold each line from the file
+    char line[256];
     while (fgets(line, sizeof(line), file)) {
         char title[MAX_TITLE_LENGTH];
-        char author[MAX_TITLE_LENGTH];
+        char author[MAX_AUTHOR_LENGTH];
         char genres[MAX_GENRES][MAX_TITLE_LENGTH];
+        int borrow_count;
         int genre_count = 0;
 
-        // Parse the line
+        // Remove newline character from the line
+        line[strcspn(line, "\n")] = '\0';
+
+        // Parse title
         char *token = strtok(line, ",");
-        if (token) {
-            strcpy(title, token);
-            token = strtok(NULL, ",");
-            if (token) {
-                strcpy(author, token);
-                token = strtok(NULL, ","); // Read the first genre
-                while (token && genre_count < MAX_GENRES) {
-                    // Trim whitespace
-                    while (*token == ' ') token++;
-                    strcpy(genres[genre_count++], token);
-                    token = strtok(NULL, ",");  // Continue reading genres
+        if (token == NULL) continue;
+        strncpy(title, token, MAX_TITLE_LENGTH);
+
+        // Parse author
+        token = strtok(NULL, ",");
+        if (token == NULL) continue;
+        strncpy(author, token, MAX_AUTHOR_LENGTH);
+
+        // Parse genres
+        while ((token = strtok(NULL, ",")) != NULL) {
+            // Check if this token is the borrow count (last token)
+            if (sscanf(token, "%d", &borrow_count) == 1) {
+                break;
+            }
+            // Otherwise, add the genre to the array
+            strncpy(genres[genre_count], token, MAX_TITLE_LENGTH);
+            genre_count++;
+        }
+
+        // Add the book to the library
+        add_book(library, title, author, genres, genre_count, borrow_count);
+    }
+
+    fclose(file);
+    printf("Books loaded successfully from file.\n");
+}
+// Enhanced search function
+Book *search_book(Library *library, const char *title, const char *genre)
+{
+    Book *current = library->header;
+
+    // Traverse through the levels of the skip list, starting from the highest
+    for (int i = library->level; i >= 0; i--)
+    {
+        while (current->forward[i] != NULL && strcmp(current->forward[i]->title, title) < 0)
+        {
+            current = current->forward[i];
+        }
+    }
+
+    // Move to the next node at level 0 where the title could be located
+    current = current->forward[0];
+
+    // Check for gaps in the title search
+    int title_length = strlen(title);
+    int gap_found = 0;
+
+    // Loop through the current node to find matches with gaps
+    while (current != NULL)
+    {
+        if (strncmp(current->title, title, title_length) == 0)
+        {
+            // If the current title matches the search title with allowed gaps
+            for (int j = 0; j < current->gen_count; j++)
+            {
+                if (strcmp(current->genre[j], genre) == 0)
+                {
+                    return current; // Found book with matching title and genre
                 }
-                add_book(library, title, author, genres, genre_count); // Add the book to the library
             }
         }
-    }
-
-    fclose(file); // Close the file after reading
-}
-
-// Function to search for a book by title within a specific genre
-void search_book_in_genre(const Library *library, const char *title, const char *genre) {
-    int genre_index = get_genre_index(genre);
-    if (genre_index < 0) {
-        printf("Invalid genre '%s'.\n", genre);
-        return;
-    }
-
-    Book *current = library->genre_heads[genre_index];
-    if (!current) {
-        printf("No books available in the genre '%s'.\n", genre);
-        return;
-    }
-
-    while (current != NULL) {
-        int comparison = strcmp(current->title, title);
-        if (comparison == 0) {
-            printf("Found: Title: %s, Author: %s, Genre: %s\n", current->title, current->author, current->genre[0]);
-            return; // Book found
-        } else if (comparison > 0) {
-            break; // Since books are sorted, if current title is greater, we can stop
-        }
-        current = current->forward[0]; // Move to the next book
-    }
-    printf("Book with title '%s' not found in genre '%s'.\n", title, genre);
-}
-
-// Function to search for a book by title, using grouping
-void search_book(const Library *library, const char *title) {
-    int group_index = get_group_index(title);
-    if (group_index < 0 || group_index >= MAX_GROUPS) {
-        printf("No group found for title '%s'.\n", title);
-        return;
-    }
-
-    // Search in the title group
-    Book *current = library->title_groups[group_index];
-    while (current != NULL) {
-        int comparison = strcmp(current->title, title);
-        if (comparison == 0) {
-            printf("Found in group: Title: %s, Author: %s\n", current->title, current->author);
-            current->borrow_count++; // Increment borrow count
-            current->last_borrowed = time(NULL); // Update last borrowed time
-            return; // Book found
-        } else if (comparison > 0) {
-            break; // No need to continue if current title is greater
-        }
-        current = current->next; // Move to the next book in the group
-    }
-    printf("Book with title '%s' not found in group.\n", title);
-}
-
-// Function to recommend popular books based on borrow count
-void recommend_books(const Library *library) {
-    // Collect all books into an array for sorting
-    Book *all_books[library->total_books];
-    int count = 0;
-
-    for (int i = 0; i < MAX_GENRES; i++) {
-        Book *current = library->genre_heads[i];
-        while (current != NULL) {
-            all_books[count++] = current;
-            current = current->forward[0]; // Move to the next book
-        }
-    }
-
-    printf("Total books collected for recommendations: %d\n", count);
-    for (int i = 0; i < count; i++) {
-        printf("Book: %s, Borrow Count: %d\n", all_books[i]->title, all_books[i]->borrow_count);
-    }
-
-    // Sort the array based on borrow count (simple bubble sort for demonstration)
-    for (int i = 0; i < count - 1; i++) {
-        for (int j = 0; j < count - i - 1; j++) {
-            if (all_books[j]->borrow_count < all_books[j + 1]->borrow_count) {
-                // Swap
-                Book *temp = all_books[j];
-                all_books[j] = all_books[j + 1];
-                all_books[j + 1] = temp;
+        // Check for gaps in the title
+        if (current->title[title_length] == ' ' || current->title[title_length] == '\0')
+        {
+            gap_found = 1;
+            for (int j = 0; j < current->gen_count; j++)
+            {
+                if (strcmp(current->genre[j], genre) == 0)
+                {
+                    return current; // Found book with matching genre after a gap
+                }
             }
         }
+        current = current->forward[0];
     }
 
-    // Print recommendations
-    printf("\nRecommended Books (Top %d):\n", MAX_RECOMMENDATIONS);
-    for (int i = 0; i < MAX_RECOMMENDATIONS && i < count; i++) {
-        printf("Title: %s, Author: %s, Borrow Count: %d\n", all_books[i]->title, all_books[i]->author, all_books[i]->borrow_count);
+    // Return NULL if no match found
+    return NULL;
+}
+
+// Function to decay borrow counts over time
+void decay_borrow_counts(Library *library) {
+    time_t current_time = time(NULL);
+    for (Book *current = library->header->forward[0]; current != NULL; current = current->forward[0]) {
+        double decay_factor = difftime(current_time, current->last_borrowed) / (30 * 24 * 60 * 60);
+        current->borrow_count = (int)(current->borrow_count * pow(DECAY_RATE, decay_factor));
     }
 }
 
-// Function to print the books in the library
-void print_books(const Library *library) {
-    const char *genre_names[MAX_GENRES] = {"Fiction", "Non-Fiction", "Fantasy", "Science Fiction", "Biography", "History", "Mystery", "Romance", "Horror", "Adventure"};
-    
-    for (int i = 0; i < MAX_GENRES; i++) {
-        printf("Books in genre %s:\n", genre_names[i]);
-        Book *current = library->genre_heads[i];
-        while (current != NULL) {
-            printf("Title: %s, Author: %s\n", current->title, current->author);
-            current = current->forward[0];  // Move to the next book in the skip list
+// Function to print all books in the library
+void print_books(Library *library) {
+    printf("Books in Library:\n");
+    for (Book *current = library->header->forward[0]; current != NULL; current = current->forward[0]) {
+        printf("Title: %s, Author: %s, Genres: ", current->title, current->author);
+        for (int j = 0; j < current->gen_count; j++) { // Changed to use gen_count
+            printf("%s%s", current->genre[j], (j < current->gen_count - 1) ? ", " : ""); // Use a conditional to manage commas
         }
-        if (!library->genre_heads[i]) {
-            printf("No books available in this genre.\n");
-        }
+        printf(", Borrow Count: %d\n", current->borrow_count);
     }
 }
 
-// Function to free allocated memory
+// Function to free memory allocated for the library
 void free_library(Library *library) {
-    for (int i = 0; i < MAX_GENRES; i++) {
-        Book *current = library->genre_heads[i];
-        while (current != NULL) {
-            Book *to_delete = current;
-            current = current->forward[0];  // Move to the next book
-            free(to_delete);  // Free the memory of the book
-        }
+    Book *current = library->header;
+    while (current != NULL) {
+        Book *next = current->forward[0];
+        free(current);
+        current = next;
     }
-    for (int i = 0; i < MAX_GROUPS; i++) {
-        Book *current = library->title_groups[i];
-        while (current != NULL) {
-            Book *to_delete = current;
-            current = current->next;  // Move to the next book
-            free(to_delete);  // Free the memory of the book
-        }
-    }
+    free(library);
 }
 
 // Main function
-int main() {
-    Library library;
-    init_library(&library);
+int main()
+{
+    srand(time(NULL));
+    Library *library = create_library();
 
-    // Load books from the file
-    load_books_from_file(&library, "data.txt");
-
-    // Main menu
     int choice;
-    do {
-        printf("\nMenu:\n");
-        printf("1. Print all books\n");
-        printf("2. Search for a book by title\n");
-        printf("3. Search for a book by title in a specific genre\n");
-        printf("4. Get recommendations\n");
-        printf("0. Exit\n");
+    do
+    {
+        printf("\nLibrary Menu:\n");
+        printf("1. Load books from file\n");
+        printf("2. Add a new book\n");
+        printf("3. Search for a book\n");
+        printf("4. Print all books\n");
+        printf("5. recommend books\n");
+        printf("6. Borrow a book\n");
+        printf("7. Return a book\n");
+        printf("8. Exit\n");
         printf("Enter your choice: ");
         scanf("%d", &choice);
-        getchar(); // Consume newline after scanf
+        getchar(); // to consume newline
 
-        switch (choice) {
-            case 1:
-                print_books(&library);
-                break;
-            case 2: {
-                char search_title[MAX_TITLE_LENGTH];
-                printf("Enter title to search: ");
-                fgets(search_title, sizeof(search_title), stdin);
-                search_title[strcspn(search_title, "\n")] = 0; // Remove newline
-                search_book(&library, search_title); // Searching in the alphabetical grouping
-                break;
-            }
-            case 3: {
-                char search_title[MAX_TITLE_LENGTH];
-                char search_genre[MAX_TITLE_LENGTH];
-                printf("Enter title to search: ");
-                fgets(search_title, sizeof(search_title), stdin);
-                search_title[strcspn(search_title, "\n")] = 0; // Remove newline
-
-                printf("Enter genre to search: ");
-                fgets(search_genre, sizeof(search_genre), stdin);
-                search_genre[strcspn(search_genre, "\n")] = 0; // Remove newline
-
-                search_book_in_genre(&library, search_title, search_genre);
-                break;
-            }
-            case 4:
-                recommend_books(&library);
-                break;
-            case 0:
-                free_library(&library); // Free allocated memory before exiting
-                break;
-            default:
-                printf("Invalid choice. Please try again.\n");
+        if (choice == 1)
+        {
+            char filename[100];
+            printf("Enter the filename to load books from: ");
+            fgets(filename, sizeof(filename), stdin);
+            filename[strcspn(filename, "\n")] = '\0';
+            read_books_from_file(library, filename);
         }
-    } while (choice != 0);
+        else if (choice == 2)
+        {
+            char title[MAX_TITLE_LENGTH], author[MAX_AUTHOR_LENGTH];
+            char genres[MAX_GENRES][MAX_TITLE_LENGTH];
+            int genre_count;
+            int borrow_count = 0;
+            printf("Enter book title: ");
+            fgets(title, MAX_TITLE_LENGTH, stdin);
+            title[strcspn(title, "\n")] = '\0';
 
+            printf("Enter author name: ");
+            fgets(author, MAX_AUTHOR_LENGTH, stdin);
+            author[strcspn(author, "\n")] = '\0';
+
+            printf("Enter number of genres: ");
+            scanf("%d", &genre_count);
+            getchar();
+            for (int i = 0; i < genre_count; i++)
+            {
+                printf("Enter genre %d: ", i + 1);
+                fgets(genres[i], MAX_TITLE_LENGTH, stdin);
+                genres[i][strcspn(genres[i], "\n")] = '\0';
+            }
+            add_book(library, title, author, genres, genre_count, borrow_count);
+            printf("Book added successfully.\n");
+        }
+        else if (choice == 3)
+        {
+            char title[MAX_TITLE_LENGTH], genre[MAX_TITLE_LENGTH];
+            printf("Enter book title to search: ");
+            fgets(title, MAX_TITLE_LENGTH, stdin);
+            title[strcspn(title, "\n")] = '\0';
+
+            printf("Enter genre to search: ");
+            fgets(genre, MAX_TITLE_LENGTH, stdin);
+            genre[strcspn(genre, "\n")] = '\0';
+
+            Book *book = search_book(library, title, genre);
+            if (book)
+            {
+                printf("Book found: Title: %s, Author: %s\n", book->title, book->author);
+            }
+            else
+            {
+                printf("Book not found.\n");
+            }
+        }
+        else if (choice == 4)
+        {
+            print_books(library);
+        }
+        else if (choice == 5)
+        {
+            char genre[MAX_TITLE_LENGTH];
+            printf("Enter genre to search: ");
+            fgets(genre, MAX_TITLE_LENGTH, stdin);
+            genre[strcspn(genre, "\n")] = '\0';
+            recommend_books(library, genre);
+        }
+        else if (choice == 6)
+        {
+            char title[MAX_TITLE_LENGTH], genre[MAX_TITLE_LENGTH];
+            printf("Enter book title to search: ");
+            fgets(title, MAX_TITLE_LENGTH, stdin);
+            title[strcspn(title, "\n")] = '\0';
+
+            printf("Enter genre to search: ");
+            fgets(genre, MAX_TITLE_LENGTH, stdin);
+            genre[strcspn(genre, "\n")] = '\0';
+
+            Book *book = search_book(library, title, genre); // Search without genre
+            if (book && strcmp(book->status, "available") == 0)
+            {
+                strcpy(book->status, "borrowed");
+                book->last_borrowed = time(NULL); // Update last borrowed time
+                book->borrow_count++;
+                printf("You have borrowed: %s by %s\n", book->title, book->author);
+            }
+            else
+            {
+                printf("Book is not available for borrowing.\n");
+            }
+        }
+        else if (choice == 7)
+        {
+            char title[MAX_TITLE_LENGTH], author[MAX_AUTHOR_LENGTH], genre[MAX_TITLE_LENGTH];
+            printf("Enter book title to search: ");
+            fgets(title, MAX_TITLE_LENGTH, stdin);
+            title[strcspn(title, "\n")] = '\0';
+
+            printf("Enter genre to search: ");
+            fgets(genre, MAX_TITLE_LENGTH, stdin);
+            genre[strcspn(genre, "\n")] = '\0';
+
+            Book *book = search_book(library, title, genre); // Search without genre
+            if (book && strcmp(book->status, "borrowed") == 0)
+            {
+                strcpy(book->status, "available");
+                printf("You have returned: %s by %s\n", book->title, book->author);
+            }
+            else
+            {
+                printf("This book was not borrowed or does not exist in the library.\n");
+            }
+        }
+
+    } while (choice != 8);
+
+    free_library(library);
     return 0;
 }
